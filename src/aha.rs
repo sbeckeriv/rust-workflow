@@ -234,6 +234,11 @@ pub struct Requirements {
 }
 
 #[derive(Serialize, Debug, Deserialize)]
+pub struct RequirementRootInterface {
+    requirement: Requirements,
+}
+
+#[derive(Serialize, Debug, Deserialize)]
 pub struct FeatureRootInterface {
     feature: Feature,
 }
