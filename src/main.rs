@@ -50,8 +50,9 @@ fn parse_repo_name(repo_name: &str) -> Result<(&str, &str, &str), failure::Error
     }
 }
 
-fn prs(config: Env,repo: &str) -> Result<(), failure::Error> {
-    let (owner, name, user) = parse_repo_name(&repo).unwrap_or(("sbeckeriv-org", "testtest", "sbeckeriv"));
+fn prs(config: Env, repo: &str) -> Result<Vec<String>, failure::Error> {
+    let (owner, name, user) =
+        parse_repo_name(&repo).unwrap_or(("sbeckeriv-org", "testtest", "sbeckeriv"));
 
     let q = RepoView::build_query(repo_view::Variables {
         owner: owner.to_string(),
@@ -84,8 +85,10 @@ fn prs(config: Env,repo: &str) -> Result<(), failure::Error> {
     let mut table = prettytable::Table::new();
     println!("{:?}", response_data);
     for pr in &response_data
-        .user.expect("missing user")
-        .organization.expect("missing org")
+        .user
+        .expect("missing user")
+        .organization
+        .expect("missing org")
         .repository
         .expect("missing repository")
         .pull_requests
@@ -98,7 +101,7 @@ fn prs(config: Env,repo: &str) -> Result<(), failure::Error> {
     }
 
     table.printstd();
-    Ok(())
+    Ok(vec!["a".to_string()])
 }
 
 fn main() -> Result<(), failure::Error> {
@@ -111,9 +114,18 @@ fn main() -> Result<(), failure::Error> {
 
     let repo = args.repo;
 
-    //prs(config,&repo)
-    let mut aha = aha::Aha::new(config.aha_domain, config.aha_token);
-    let feature = aha.get_feature("https://beckersbees.aha.io/api/v1/features/HIVE-6".to_string())?;
+    //let list = prs(config,&repo)
+    //for pr in list
+    let aha = aha::Aha::new(config.aha_domain, config.aha_token);
+    let feature = aha.get_feature("HIVE-6".to_string());
     println!("{:?}", feature);
+    if let Ok(ok_feature) = feature {
+        // set user
+        // set github url
+        // set status matches
+        println!("ok {:?}", ok_feature);
+    } else {
+
+    }
     Ok(())
 }

@@ -1,32 +1,67 @@
-pub struct Aha{
+pub struct Aha {
     pub domain: String,
     pub client: reqwest::Client,
 }
 
-impl Aha{
-    pub fn new(domain: String, auth_token: String) ->Aha{
+impl Aha {
+    pub fn new(domain: String, auth_token: String) -> Aha {
         let mut headers = reqwest::header::HeaderMap::new();
-        let mut auth = reqwest::header::HeaderValue::from_str(&format!("Bearer {}", auth_token)).unwrap();
+        let mut auth =
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", auth_token)).unwrap();
         auth.set_sensitive(true);
         headers.insert(reqwest::header::AUTHORIZATION, auth);
-        headers.insert(reqwest::header::USER_AGENT, reqwest::header::HeaderValue::from_static("Rust aha api v1 (Becker@aha.io)"));
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static("Rust aha api v1 (Becker@aha.io)"),
+        );
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/json"),
+        );
+        headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static("application/json"),
+        );
         let client = reqwest::Client::builder()
             .gzip(true)
             .default_headers(headers)
             .timeout(std::time::Duration::from_secs(50))
-            .build().unwrap();
-        Aha{
+            .build()
+            .unwrap();
+        Aha {
             client: client,
             domain: domain,
         }
     }
 
-    pub fn get_feature(&self, url: String) ->Result<Feature, failure::Error>{
-        let mut response = self.client.get(&url).send()?;
-        let content = response.text()?; 
+    pub fn get_requirement(&self, url: String) -> Result<Requirements, serde_json::Error> {
+        let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, url);
+        let response = self.client.get(&uri).send();
+        let content = response.unwrap().text();
         println!("{:?}", content);
-        let feature: FeatureRootInterface = serde_json::from_str(&content).unwrap();
-        Ok(feature.feature)
+        let requirement: Result<RequirementRootInterface, _> =
+            serde_json::from_str(&content.unwrap_or("".to_string()));
+        if let Ok(req) = requirement {
+            Ok(req.requirement)
+        } else {
+            let ex: Result<Requirements, serde_json::Error> = Err(requirement.unwrap_err());
+            ex
+        }
+    }
+
+    pub fn get_feature(&self, url: String) -> Result<Feature, serde_json::Error> {
+        let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, url);
+        let response = self.client.get(&uri).send();
+        let content = response.unwrap().text();
+        println!("{:?}", content);
+        let feature: Result<FeatureRootInterface, _> =
+            serde_json::from_str(&content.unwrap_or("".to_string()));
+        if let Ok(fe) = feature {
+            Ok(fe.feature)
+        } else {
+            let ex: Result<Feature, serde_json::Error> = Err(feature.unwrap_err());
+            ex
+        }
     }
 }
 
@@ -178,7 +213,7 @@ pub struct MasterFeature {
 
 #[derive(Serialize, Debug, Deserialize)]
 pub struct Owner {
-   // id: String,
+    id: String,
     name: String,
     email: String,
     created_at: String,
@@ -257,4 +292,3 @@ pub struct WorkflowStatus {
     complete: bool,
     color: String,
 }
-

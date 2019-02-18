@@ -1,11 +1,12 @@
 query RepoView($owner: String!, $name: String!, $username: String!) {
   user(login: $username) {
-    login
     organization(login: $owner) {
-      login
       repository(name: $name) {
-        pullRequests(first: 50, states: OPEN) {
+        pullRequests(first: 50, states: OPEN, orderBy: {field: CREATED_AT, direction: DESC} ) {
           nodes {
+            headRef {
+              name
+            }
             title
             mergeable
             state
