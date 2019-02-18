@@ -14,11 +14,11 @@ extern crate serde_derive;
 extern crate structopt;
 #[macro_use]
 extern crate prettytable;
+mod aha;
 
 use graphql_client::*;
 use structopt::StructOpt;
 
-type URI = String;
 type HTML = String;
 
 #[derive(GraphQLQuery)]
@@ -38,6 +38,8 @@ struct Command {
 #[derive(Deserialize, Debug)]
 struct Env {
     github_api_token: String,
+    aha_domain: String,
+    aha_token: String,
 }
 
 fn parse_repo_name(repo_name: &str) -> Result<(&str, &str, &str), failure::Error> {
@@ -48,15 +50,7 @@ fn parse_repo_name(repo_name: &str) -> Result<(&str, &str, &str), failure::Error
     }
 }
 
-fn main() -> Result<(), failure::Error> {
-    dotenv::dotenv().ok();
-    env_logger::init();
-
-    let config: Env = envy::from_env()?;
-
-    let args = Command::from_args();
-
-    let repo = args.repo;
+fn prs(config: Env,repo: &str) -> Result<(), failure::Error> {
     let (owner, name, user) = parse_repo_name(&repo).unwrap_or(("sbeckeriv-org", "testtest", "sbeckeriv"));
 
     let q = RepoView::build_query(repo_view::Variables {
@@ -104,5 +98,22 @@ fn main() -> Result<(), failure::Error> {
     }
 
     table.printstd();
+    Ok(())
+}
+
+fn main() -> Result<(), failure::Error> {
+    dotenv::dotenv().ok();
+    env_logger::init();
+
+    let config: Env = envy::from_env()?;
+
+    let args = Command::from_args();
+
+    let repo = args.repo;
+
+    //prs(config,&repo)
+    let mut aha = aha::Aha::new(config.aha_domain, config.aha_token);
+    let feature = aha.get_feature("https://beckersbees.aha.io/api/v1/features/HIVE-6".to_string())?;
+    println!("{:?}", feature);
     Ok(())
 }
