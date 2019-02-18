@@ -1,3 +1,6 @@
+use regex::Regex;
+use super::github;
+
 pub struct Aha {
     pub domain: String,
     pub client: reqwest::Client,
@@ -31,6 +34,25 @@ impl Aha {
         Aha {
             client: client,
             domain: domain,
+        }
+    }
+
+    pub fn sync_pr(&self, pr: github::PullRequest) -> Result<(),failure::Error>{
+        Ok(())
+    }
+
+    pub fn type_from_name(name: String) -> Option<(String, String)> {
+        //could return enum
+        let req = Regex::new(r"^([A-Z]{1,}-\d{1,}-\d{2,})").unwrap();
+        let fet = Regex::new(r"^([A-Z]{1,}-\d{1,})").unwrap();
+        let rc = req.captures(&name);
+        let fc = fet.captures(&name);
+        if let Some(rc) = rc {
+            Some(("requirement".to_string(), rc[0].to_string()))
+        } else if let Some(fc) = fc {
+            Some(("feature".to_string(), fc[0].to_string()))
+        } else {
+            None
         }
     }
 
