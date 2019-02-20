@@ -76,7 +76,6 @@ impl Aha {
             None
         };
         let current_status = current_feature.workflow_status.name;
-        println!("{}", current_status);
         if status.is_none()
             && (current_status == "Ready to develop" || current_status == "Under consideration")
         {
@@ -101,12 +100,12 @@ impl Aha {
 
         let response = self.client.put(&uri).json(&feature).send();
         let content = response.unwrap().text();
-        println!("{:?}", content);
-        let feature: Result<FeatureRootInterface, _> =
-            serde_json::from_str(&content.unwrap_or("".to_string()));
+        let text = &content.unwrap_or("".to_string());
+        let feature: Result<FeatureRootInterface, _> = serde_json::from_str(&text);
         if let Ok(fe) = feature {
             Ok(fe.feature)
         } else {
+            println!("{:?}", text);
             let ex: Result<Feature, serde_json::Error> = Err(feature.unwrap_err());
             ex
         }
@@ -131,7 +130,6 @@ impl Aha {
         let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, url);
         let response = self.client.get(&uri).send();
         let content = response.unwrap().text();
-        println!("{:?}", content);
         let requirement: Result<RequirementRootInterface, _> =
             serde_json::from_str(&content.unwrap_or("".to_string()));
         if let Ok(req) = requirement {

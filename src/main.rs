@@ -49,7 +49,6 @@ fn main() -> Result<(), failure::Error> {
     let list = github::prs(github).unwrap();
     let aha = aha::Aha::new(config.aha_domain, config.aha_token, config.workflow_email);
     for pr in list {
-        println!("pr: {:?}", pr);
         aha.sync_pr(pr).unwrap();
     }
     Ok(())

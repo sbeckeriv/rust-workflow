@@ -3,8 +3,6 @@ pub struct GithubEnv {
     pub workflow_repo: String,
     pub workflow_login: String,
 }
-type HTML = String;
-type URI = String;
 
 #[derive(Debug)]
 pub struct PullRequest {
@@ -46,7 +44,6 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
         "https://api.github.com/search/issues?q=is:pr+repo:{}/{}+author:{}&sort=created",
         owner, name, config.workflow_login
     );
-    //println!("{:?}", q);
     let mut res = client
         .get(&url)
         .basic_auth(
@@ -61,7 +58,6 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
     let response_data = response_body.items;
     let mut branches: Vec<PullRequest> = Vec::new();
     let mut table = prettytable::Table::new();
-    //println!("{:?}", response_data);
     for issue in &response_data {
         let ref_head = issue.title.clone();
         let label_names: Vec<String> = issue
@@ -69,10 +65,11 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
             .iter()
             .map(|label| label.name.clone())
             .collect();
-
+        let mut body = issue.body.clone();
+        body.truncate(50);
         table.add_row(row!(
             issue.title,
-            issue.body,
+            body,
             ref_head,
             label_names.join(","),
             issue.url,
