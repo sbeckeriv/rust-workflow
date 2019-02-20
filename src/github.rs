@@ -3,17 +3,9 @@ pub struct GithubEnv {
     pub workflow_repo: String,
     pub workflow_login: String,
 }
-use graphql_client::*;
 type HTML = String;
 type URI = String;
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "src/schema.graphql",
-    query_path = "src/query_1.graphql",
-    response_derives = "Debug"
-)]
-struct RepoView;
 #[derive(Debug)]
 pub struct PullRequest {
     pub number: i64,
@@ -21,6 +13,7 @@ pub struct PullRequest {
     pub url: String,
     pub labels: Vec<String>,
 }
+
 impl PullRequest {
     pub fn status_for_labels(&self) -> Option<String> {
         self.labels
@@ -29,7 +22,7 @@ impl PullRequest {
                 "In development" => Some("".to_string()),
                 "Needs code review" => Some("".to_string()),
                 "Needs PM review" => Some("".to_string()),
-                "Ready" => Some("Ready to ship".to_string()),
+                "Ready" => Some("".to_string()),
                 _ => None,
             })
             .filter(|label| label.is_some())
@@ -50,82 +43,108 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
     let (owner, name) =
         parse_repo_name(&config.workflow_repo).unwrap_or(("sbeckeriv-org", "testtest"));
 
-    let q = RepoView::build_query(repo_view::Variables {
-        owner: owner.to_string(),
-        name: name.to_string(),
-        username: config.workflow_login.to_string(),
-    });
-
     let client = reqwest::Client::new();
-
+    let url = format!(
+        "https://api.github.com/search/issues?q=is:pr+repo:aha-app/aha-app+author:{}&sort=created",
+        config.workflow_login
+    );
     //println!("{:?}", q);
     let mut res = client
-        .post("https://api.github.com/graphql")
-        .bearer_auth(config.github_api_token)
-        .json(&q)
+        .get(&url)
+        .basic_auth(
+            config.workflow_login.clone(),
+            Some(config.github_api_token.clone()),
+        )
         .send()?;
 
-    let response_body: Response<repo_view::ResponseData> = res.json()?;
+    let response_body: RootInterface = res.json()?;
     info!("{:?}", response_body);
 
-    if let Some(errors) = response_body.errors {
-        println!("there are errors:");
-
-        for error in &errors {
-            println!("{:?}", error);
-        }
-    }
-
-    let response_data: repo_view::ResponseData = response_body.data.expect("missing response data");
+    let response_data = response_body.items;
     let mut branches: Vec<PullRequest> = Vec::new();
     let mut table = prettytable::Table::new();
     //println!("{:?}", response_data);
-    for pr in &response_data
-        .user
-        .expect("missing user")
-        .organization
-        .expect("missing org")
-        .repository
-        .expect("missing repository")
-        .pull_requests
-        .nodes
-        .expect("pr nodes is null")
-    {
-        if let Some(pr) = pr {
-            let mut ref_head = "".to_string();
-            let mut label_names: Vec<String> = Vec::new();
-            if let Some(head) = &pr.head_ref {
-                ref_head = head.name.clone();
-            }
-            if let Some(edges) = &pr.labels {
-                for labels in &edges.edges {
-                    for label in labels {
-                        if let Some(l) = label {
-                            if let Some(node) = &l.node {
-                                label_names.push(node.name.clone());
-                            }
-                        }
-                    }
-                }
-            }
+    for issue in &response_data {
+        let ref_head = issue.title.clone();
+        let label_names: Vec<String> = issue
+            .labels
+            .iter()
+            .map(|label| label.name.clone())
+            .collect();
 
-            table.add_row(row!(
-                pr.title,
-                pr.body_text,
-                ref_head,
-                label_names.join(","),
-                pr.url,
-            ));
-            let pull = PullRequest {
-                number: pr.number,
-                url: pr.url.clone(),
-                name: ref_head,
-                labels: label_names,
-            };
-            branches.push(pull);
-        }
+        table.add_row(row!(
+            issue.title,
+            issue.body,
+            ref_head,
+            label_names.join(","),
+            issue.url,
+        ));
+        let pull = PullRequest {
+            number: issue.number,
+            url: issue.url.clone(),
+            name: ref_head,
+            labels: label_names,
+        };
+        branches.push(pull);
     }
 
     table.printstd();
     Ok(branches)
+}
+#[derive(Serialize, Debug, Deserialize)]
+struct Items {
+    url: String,
+    id: i64,
+    node_id: String,
+    number: i64,
+    title: String,
+    labels: Vec<Labels>,
+    state: String,
+    created_at: String,
+    updated_at: String,
+    closed_at: Option<String>,
+    body: String,
+}
+
+#[derive(Serialize, Debug, Deserialize)]
+struct Labels {
+    name: String,
+}
+
+#[derive(Serialize, Debug, Deserialize)]
+struct PullRequest1 {
+    url: String,
+    html_url: String,
+    diff_url: String,
+    patch_url: String,
+}
+
+#[derive(Serialize, Debug, Deserialize)]
+struct RootInterface {
+    total_count: i64,
+    incomplete_results: bool,
+    items: Vec<Items>,
+}
+
+#[derive(Serialize, Debug, Deserialize)]
+struct User {
+    login: String,
+    id: i64,
+    node_id: String,
+    avatar_url: String,
+    gravatar_id: String,
+    url: String,
+    html_url: String,
+    followers_url: String,
+    following_url: String,
+    gists_url: String,
+    starred_url: String,
+    subscriptions_url: String,
+    organizations_url: String,
+    repos_url: String,
+    events_url: String,
+    received_events_url: String,
+    #[serde(rename = "type")]
+    _type: String,
+    site_admin: bool,
 }
