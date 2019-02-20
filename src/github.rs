@@ -40,13 +40,11 @@ fn parse_repo_name(repo_name: &str) -> Result<(&str, &str), failure::Error> {
 }
 
 pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
-    let (owner, name) =
-        parse_repo_name(&config.workflow_repo).unwrap_or(("sbeckeriv-org", "testtest"));
-
+    let (owner, name) = parse_repo_name(&config.workflow_repo).unwrap();
     let client = reqwest::Client::new();
     let url = format!(
-        "https://api.github.com/search/issues?q=is:pr+repo:aha-app/aha-app+author:{}&sort=created",
-        config.workflow_login
+        "https://api.github.com/search/issues?q=is:pr+repo:{}/{}+author:{}&sort=created",
+        owner, name, config.workflow_login
     );
     //println!("{:?}", q);
     let mut res = client

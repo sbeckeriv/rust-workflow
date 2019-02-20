@@ -1,6 +1,6 @@
 use super::github;
+use notify_rust::Notification;
 use regex::Regex;
-use std::collections::HashMap;
 
 pub struct Aha {
     pub domain: String,
@@ -70,18 +70,35 @@ impl Aha {
         let custom = CustomFieldGithub {
             github_url: pr.url.clone(),
         };
-        let status = if let Some(wf) = pr.status_for_labels() {
+        let mut status = if let Some(wf) = pr.status_for_labels() {
             Some(WorkflowStatusUpdate { name: wf })
         } else {
             None
         };
+        let current_status = current_feature.workflow_status.name;
+        println!("{}", current_status);
+        if status.is_none()
+            && (current_status == "Ready to develop" || current_status == "Under consideration")
+        {
+            status = Some(WorkflowStatusUpdate {
+                name: "In code review".to_string(),
+            })
+        }
 
         let feature = FeatureUpdate {
             assigned_to_user: assigned,
             custom_fields: Some(custom),
             workflow_status: status,
         };
-        println!("{:?}", feature);
+
+        Notification::new()
+            .summary(&format!("Updating feature {}", key))
+            .body(&format!("{:?}", feature))
+            .icon("firefox")
+            .timeout(0)
+            .show()
+            .unwrap();
+
         let response = self.client.put(&uri).json(&feature).send();
         let content = response.unwrap().text();
         println!("{:?}", content);

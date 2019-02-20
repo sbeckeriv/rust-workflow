@@ -5,6 +5,7 @@ authors = ["becker <github@deathbyescalator.com>"]
 edition = "2018"
 
 [dependencies]
+notify-rust = "3"
 regex = "1"
 failure = "*"
 graphql_client = "*"

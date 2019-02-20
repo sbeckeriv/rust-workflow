@@ -2,7 +2,6 @@ extern crate dotenv;
 extern crate envy;
 #[macro_use]
 extern crate failure;
-extern crate graphql_client;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -14,11 +13,11 @@ extern crate serde_derive;
 extern crate structopt;
 #[macro_use]
 extern crate prettytable;
+extern crate notify_rust;
 extern crate regex;
+use structopt::StructOpt;
 mod aha;
 mod github;
-
-use structopt::StructOpt;
 
 #[derive(StructOpt)]
 struct Command {
