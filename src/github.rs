@@ -14,7 +14,7 @@ type URI = String;
     response_derives = "Debug"
 )]
 struct RepoView;
-
+#[derive(Debug)]
 pub struct PullRequest {
     pub number: i64,
     pub name: String,
@@ -29,7 +29,7 @@ impl PullRequest {
                 "In development" => Some("".to_string()),
                 "Needs code review" => Some("".to_string()),
                 "Needs PM review" => Some("".to_string()),
-                "Ready" => Some("".to_string()),
+                "Ready" => Some("Ready to ship".to_string()),
                 _ => None,
             })
             .filter(|label| label.is_some())

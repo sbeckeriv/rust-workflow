@@ -33,6 +33,7 @@ struct Env {
     aha_token: String,
     workflow_repo: String,
     workflow_login: String,
+    workflow_email: String,
 }
 
 fn main() -> Result<(), failure::Error> {
@@ -46,18 +47,11 @@ fn main() -> Result<(), failure::Error> {
         workflow_repo: config.workflow_repo,
         workflow_login: config.workflow_login,
     };
-    let list = github::prs(github);
-    //for pr in list
-    let aha = aha::Aha::new(config.aha_domain, config.aha_token);
-    let feature = aha.get_feature("HIVE-6".to_string());
-    println!("{:?}", feature);
-    if let Ok(ok_feature) = feature {
-        // set user
-        // set github url
-        // set status matches
-        println!("ok {:?}", ok_feature);
-    } else {
-
+    let list = github::prs(github).unwrap();
+    let aha = aha::Aha::new(config.aha_domain, config.aha_token, config.workflow_email);
+    for pr in list {
+        println!("pr: {:?}", pr);
+        aha.sync_pr(pr).unwrap();
     }
     Ok(())
 }

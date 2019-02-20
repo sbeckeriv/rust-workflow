@@ -1,13 +1,15 @@
-use regex::Regex;
 use super::github;
+use regex::Regex;
+use std::collections::HashMap;
 
 pub struct Aha {
     pub domain: String,
     pub client: reqwest::Client,
+    pub user_email: String,
 }
 
 impl Aha {
-    pub fn new(domain: String, auth_token: String) -> Aha {
+    pub fn new(domain: String, auth_token: String, email: String) -> Aha {
         let mut headers = reqwest::header::HeaderMap::new();
         let mut auth =
             reqwest::header::HeaderValue::from_str(&format!("Bearer {}", auth_token)).unwrap();
@@ -34,14 +36,66 @@ impl Aha {
         Aha {
             client: client,
             domain: domain,
+            user_email: email,
         }
     }
 
-    pub fn sync_pr(&self, pr: github::PullRequest) -> Result<(),failure::Error>{
+    pub fn sync_pr(&self, pr: github::PullRequest) -> Result<(), failure::Error> {
+        if let Some((source, key)) = self.type_from_name(&pr.name) {
+            if source == "feature" {
+                if let Ok(feature) = self.get_feature(key.clone()) {
+                    self.update_feature(key.clone(), pr, feature).unwrap();
+                }
+            } else if source == "requirement" {
+                if let Ok(requirement) = self.get_requirement(key) {
+                    //self.update_requirement(key, pr)
+                }
+            }
+        }
         Ok(())
     }
 
-    pub fn type_from_name(name: String) -> Option<(String, String)> {
+    pub fn update_feature(
+        &self,
+        key: String,
+        pr: github::PullRequest,
+        current_feature: Feature,
+    ) -> Result<Feature, serde_json::Error> {
+        let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, key);
+        let assigned = if current_feature.assigned_to_user.is_none() {
+            Some(self.user_email.clone())
+        } else {
+            None
+        };
+        let custom = CustomFieldGithub {
+            github_url: pr.url.clone(),
+        };
+        let status = if let Some(wf) = pr.status_for_labels() {
+            Some(WorkflowStatusUpdate { name: wf })
+        } else {
+            None
+        };
+
+        let feature = FeatureUpdate {
+            assigned_to_user: assigned,
+            custom_fields: Some(custom),
+            workflow_status: status,
+        };
+        println!("{:?}", feature);
+        let response = self.client.put(&uri).json(&feature).send();
+        let content = response.unwrap().text();
+        println!("{:?}", content);
+        let feature: Result<FeatureRootInterface, _> =
+            serde_json::from_str(&content.unwrap_or("".to_string()));
+        if let Ok(fe) = feature {
+            Ok(fe.feature)
+        } else {
+            let ex: Result<Feature, serde_json::Error> = Err(feature.unwrap_err());
+            ex
+        }
+    }
+
+    pub fn type_from_name(&self, name: &str) -> Option<(String, String)> {
         //could return enum
         let req = Regex::new(r"^([A-Z]{1,}-\d{1,}-\d{2,})").unwrap();
         let fet = Regex::new(r"^([A-Z]{1,}-\d{1,})").unwrap();
@@ -73,9 +127,10 @@ impl Aha {
 
     pub fn get_feature(&self, url: String) -> Result<Feature, serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, url);
+        //println!("{}", uri);
         let response = self.client.get(&uri).send();
         let content = response.unwrap().text();
-        println!("{:?}", content);
+        //println!("{:?}", content);
         let feature: Result<FeatureRootInterface, _> =
             serde_json::from_str(&content.unwrap_or("".to_string()));
         if let Ok(fe) = feature {
@@ -123,6 +178,24 @@ pub struct Description {
     body: String,
     created_at: String,
     attachments: Vec<Attachments>,
+}
+
+#[derive(Serialize, Debug, Deserialize)]
+pub struct FeatureUpdate {
+    assigned_to_user: Option<String>,
+    custom_fields: Option<CustomFieldGithub>,
+    workflow_status: Option<WorkflowStatusUpdate>,
+}
+
+#[derive(Serialize, Debug, Deserialize)]
+pub struct WorkflowStatusUpdate {
+    name: String,
+}
+
+#[derive(Serialize, Debug, Deserialize)]
+pub struct CustomFieldGithub {
+    #[serde(rename = "pull_request")]
+    github_url: String,
 }
 
 #[derive(Serialize, Debug, Deserialize)]
