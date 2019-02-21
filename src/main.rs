@@ -19,10 +19,16 @@ use structopt::StructOpt;
 mod aha;
 mod github;
 
-#[derive(StructOpt)]
-struct Command {
-    #[structopt(name = "repository")]
+#[derive(StructOpt, Debug)]
+pub struct Opt {
+    #[structopt(short = "r", long = "repo", name = "repo")]
     repo: String,
+    #[structopt(short = "d", long = "dryrun")]
+    dry_run: bool,
+    #[structopt(short = "s", long = "silent")]
+    silent: bool,
+    #[structopt(short = "v", long = "verbose")]
+    verbose: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -36,6 +42,10 @@ struct Env {
 }
 
 fn main() -> Result<(), failure::Error> {
+    let opt = Opt::from_args();
+    if !opt.silent {
+        println!("{:?}", opt);
+    }
     dotenv::dotenv().ok();
     env_logger::init();
 
@@ -43,11 +53,18 @@ fn main() -> Result<(), failure::Error> {
 
     let github = github::GithubEnv {
         github_api_token: config.github_api_token,
-        workflow_repo: config.workflow_repo,
+        workflow_repo: opt.repo.clone(),
         workflow_login: config.workflow_login,
+        silent: opt.silent,
+        verbose: opt.verbose,
     };
     let list = github::prs(github).unwrap();
-    let aha = aha::Aha::new(config.aha_domain, config.aha_token, config.workflow_email);
+    let aha = aha::Aha::new(
+        config.aha_domain,
+        config.aha_token,
+        config.workflow_email,
+        opt,
+    );
     for pr in list {
         aha.sync_pr(pr).unwrap();
     }

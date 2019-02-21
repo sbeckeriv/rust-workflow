@@ -2,6 +2,8 @@ pub struct GithubEnv {
     pub github_api_token: String,
     pub workflow_repo: String,
     pub workflow_login: String,
+    pub silent: bool,
+    pub verbose: bool,
 }
 
 #[derive(Debug)]
@@ -41,9 +43,12 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
     let (owner, name) = parse_repo_name(&config.workflow_repo).unwrap();
     let client = reqwest::Client::new();
     let url = format!(
-        "https://api.github.com/search/issues?q=is:pr+repo:{}/{}+author:{}&sort=created",
+        "https://api.github.com/search/issues?q=is:open+is:pr+repo:{}/{}+author:{}&sort=created",
         owner, name, config.workflow_login
     );
+    if config.verbose {
+        println!("github search url: {}", url)
+    }
     let mut res = client
         .get(&url)
         .basic_auth(
@@ -52,8 +57,10 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
         )
         .send()?;
 
-    let response_body: RootInterface = res.json()?;
-    info!("{:?}", response_body);
+    let response_body: RootInterface = res.json().expect("Could not find repo");
+    if config.verbose {
+        info!("{:?}", response_body);
+    }
 
     let response_data = response_body.items;
     let mut branches: Vec<PullRequest> = Vec::new();
@@ -66,29 +73,32 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
             .map(|label| label.name.clone())
             .collect();
         let mut body = issue.body.clone();
-        body.truncate(50);
+        body.truncate(20);
         table.add_row(row!(
             issue.title,
             body,
             ref_head,
             label_names.join(","),
-            issue.url,
+            issue.html_url,
         ));
         let pull = PullRequest {
             number: issue.number,
-            url: issue.url.clone(),
+            url: issue.html_url.clone(),
             name: ref_head,
             labels: label_names,
         };
         branches.push(pull);
     }
 
-    table.printstd();
+    if !config.silent {
+        table.printstd();
+    }
     Ok(branches)
 }
 #[derive(Serialize, Debug, Deserialize)]
 struct Items {
     url: String,
+    html_url: String,
     id: i64,
     node_id: String,
     number: i64,

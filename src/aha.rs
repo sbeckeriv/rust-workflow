@@ -1,4 +1,5 @@
 use super::github;
+use super::Opt;
 use notify_rust::Notification;
 use regex::Regex;
 
@@ -6,10 +7,11 @@ pub struct Aha {
     pub domain: String,
     pub client: reqwest::Client,
     pub user_email: String,
+    pub opt: Opt,
 }
 
 impl Aha {
-    pub fn new(domain: String, auth_token: String, email: String) -> Aha {
+    pub fn new(domain: String, auth_token: String, email: String, opt: Opt) -> Aha {
         let mut headers = reqwest::header::HeaderMap::new();
         let mut auth =
             reqwest::header::HeaderValue::from_str(&format!("Bearer {}", auth_token)).unwrap();
@@ -37,6 +39,7 @@ impl Aha {
             client: client,
             domain: domain,
             user_email: email,
+            opt: opt,
         }
     }
 
@@ -47,12 +50,84 @@ impl Aha {
                     self.update_feature(key.clone(), pr, feature).unwrap();
                 }
             } else if source == "requirement" {
-                if let Ok(requirement) = self.get_requirement(key) {
-                    //self.update_requirement(key, pr)
+                if let Ok(requirement) = self.get_requirement(key.clone()) {
+                    self.update_requirement(key.clone(), pr, requirement)
+                        .unwrap();
                 }
             }
         }
         Ok(())
+    }
+
+    pub fn update_requirement(
+        &self,
+        key: String,
+        pr: github::PullRequest,
+        current: Requirements,
+    ) -> Result<(), serde_json::Error> {
+        let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, key);
+        let assigned = if current.assigned_to_user.is_none() {
+            Some(self.user_email.clone())
+        } else {
+            None
+        };
+        let custom = CustomFieldGithub {
+            github_url: pr.url.clone(),
+        };
+        let mut status = if let Some(wf) = pr.status_for_labels() {
+            Some(WorkflowStatusUpdate { name: wf })
+        } else {
+            None
+        };
+        let current_status = current.workflow_status.name;
+        if status.is_none()
+            && (current_status == "Ready to develop" || current_status == "Under consideration")
+        {
+            status = Some(WorkflowStatusUpdate {
+                name: "In code review".to_string(),
+            })
+        }
+
+        let feature = FeatureUpdate {
+            assigned_to_user: assigned,
+            custom_fields: Some(custom),
+            workflow_status: status,
+        };
+        if self.opt.verbose {
+            println!(
+                "puting requirement json: {}",
+                serde_json::to_string(&feature)?
+            );
+        }
+        if !self.opt.silent {
+            Notification::new()
+                .summary(&format!("Updating requirement {}", key))
+                .body(&format!("{}", serde_json::to_string(&feature)?))
+                .icon("firefox")
+                .timeout(0)
+                .show()
+                .unwrap();
+        }
+        if !self.opt.dry_run {
+            let response = self.client.put(&uri).json(&feature).send();
+            let content = response.unwrap().text();
+            let text = &content.unwrap_or("".to_string());
+            if self.opt.verbose {
+                println!("updated requirement {:?}", text);
+            }
+            let feature: Result<RequirementRootInterface, _> = serde_json::from_str(&text);
+            if let Ok(_) = feature {
+                Ok(())
+            } else {
+                if self.opt.verbose {
+                    println!("json failed to parse {:?}", text);
+                }
+                let ex: Result<(), serde_json::Error> = Err(feature.unwrap_err());
+                ex
+            }
+        } else {
+            Ok(())
+        }
     }
 
     pub fn update_feature(
@@ -60,7 +135,7 @@ impl Aha {
         key: String,
         pr: github::PullRequest,
         current_feature: Feature,
-    ) -> Result<Feature, serde_json::Error> {
+    ) -> Result<(), serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, key);
         let assigned = if current_feature.assigned_to_user.is_none() {
             Some(self.user_email.clone())
@@ -89,25 +164,37 @@ impl Aha {
             custom_fields: Some(custom),
             workflow_status: status,
         };
-
-        Notification::new()
-            .summary(&format!("Updating feature {}", key))
-            .body(&format!("{:?}", feature))
-            .icon("firefox")
-            .timeout(0)
-            .show()
-            .unwrap();
-
-        let response = self.client.put(&uri).json(&feature).send();
-        let content = response.unwrap().text();
-        let text = &content.unwrap_or("".to_string());
-        let feature: Result<FeatureRootInterface, _> = serde_json::from_str(&text);
-        if let Ok(fe) = feature {
-            Ok(fe.feature)
+        if self.opt.verbose {
+            println!("puting feature json: {}", serde_json::to_string(&feature)?);
+        }
+        if !self.opt.silent {
+            Notification::new()
+                .summary(&format!("Updating feature {}", key))
+                .body(&format!("{:?}", serde_json::to_string(&feature)?))
+                .icon("firefox")
+                .timeout(0)
+                .show()
+                .unwrap();
+        }
+        if !self.opt.dry_run {
+            let response = self.client.put(&uri).json(&feature).send();
+            let content = response.unwrap().text();
+            let text = &content.unwrap_or("".to_string());
+            if self.opt.verbose {
+                println!("updated feature {:?}", text);
+            }
+            let feature: Result<FeatureRootInterface, _> = serde_json::from_str(&text);
+            if let Ok(_) = feature {
+                Ok(())
+            } else {
+                if self.opt.verbose {
+                    println!("json failed to parse {:?}", text);
+                }
+                let ex: Result<(), serde_json::Error> = Err(feature.unwrap_err());
+                ex
+            }
         } else {
-            println!("{:?}", text);
-            let ex: Result<Feature, serde_json::Error> = Err(feature.unwrap_err());
-            ex
+            Ok(())
         }
     }
 
@@ -128,8 +215,14 @@ impl Aha {
 
     pub fn get_requirement(&self, url: String) -> Result<Requirements, serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, url);
+        if self.opt.verbose {
+            println!("requirement url: {}", uri);
+        }
         let response = self.client.get(&uri).send();
         let content = response.unwrap().text();
+        if self.opt.verbose {
+            println!("{:?}", content);
+        }
         let requirement: Result<RequirementRootInterface, _> =
             serde_json::from_str(&content.unwrap_or("".to_string()));
         if let Ok(req) = requirement {
@@ -142,10 +235,14 @@ impl Aha {
 
     pub fn get_feature(&self, url: String) -> Result<Feature, serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, url);
-        //println!("{}", uri);
+        if self.opt.verbose {
+            println!("Feature url: {}", uri);
+        }
         let response = self.client.get(&uri).send();
         let content = response.unwrap().text();
-        //println!("{:?}", content);
+        if self.opt.verbose {
+            println!("Feature text {:?}", content);
+        }
         let feature: Result<FeatureRootInterface, _> =
             serde_json::from_str(&content.unwrap_or("".to_string()));
         if let Ok(fe) = feature {
@@ -197,8 +294,11 @@ pub struct Description {
 
 #[derive(Serialize, Debug, Deserialize)]
 pub struct FeatureUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
     assigned_to_user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     custom_fields: Option<CustomFieldGithub>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     workflow_status: Option<WorkflowStatusUpdate>,
 }
 
