@@ -93,16 +93,17 @@ impl Aha {
             custom_fields: Some(custom),
             workflow_status: status,
         };
+
+        let json_string = serde_json::to_string(&feature)?;
+
         if self.opt.verbose {
-            println!(
-                "puting requirement json: {}",
-                serde_json::to_string(&feature)?
-            );
+            println!("puting requirement json: {}", json_string);
         }
-        if !self.opt.silent {
+
+        if !self.opt.silent && json_string.len() > 0 {
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
-                .body(&format!("{}", serde_json::to_string(&feature)?))
+                .body(&format!("{}", json_string))
                 .icon("firefox")
                 .timeout(0)
                 .show()
@@ -150,7 +151,9 @@ impl Aha {
         } else {
             None
         };
+
         let current_status = current_feature.workflow_status.name;
+
         if status.is_none()
             && (current_status == "Ready to develop" || current_status == "Under consideration")
         {
@@ -164,13 +167,15 @@ impl Aha {
             custom_fields: Some(custom),
             workflow_status: status,
         };
+
+        let json_string = serde_json::to_string(&feature)?;
         if self.opt.verbose {
-            println!("puting feature json: {}", serde_json::to_string(&feature)?);
+            println!("puting feature json: {}", json_string);
         }
-        if !self.opt.silent {
+        if !self.opt.silent && json_string.len() > 0 {
             Notification::new()
                 .summary(&format!("Updating feature {}", key))
-                .body(&format!("{:?}", serde_json::to_string(&feature)?))
+                .body(&format!("{:?}", json_string))
                 .icon("firefox")
                 .timeout(0)
                 .show()
