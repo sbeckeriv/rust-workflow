@@ -45,6 +45,9 @@ impl Aha {
 
     pub fn sync_pr(&self, pr: github::PullRequest) -> Result<(), failure::Error> {
         if let Some((source, key)) = self.type_from_name(&pr.name) {
+            if self.opt.verbose {
+                println!("matched {} {} {}", pr.name, source, key);
+            }
             if source == "feature" {
                 if let Ok(feature) = self.get_feature(key.clone()) {
                     self.update_feature(key.clone(), pr, feature).unwrap();
@@ -54,6 +57,10 @@ impl Aha {
                     self.update_requirement(key.clone(), pr, requirement)
                         .unwrap();
                 }
+            }
+        } else {
+            if self.opt.verbose {
+                println!("Did not match {}", pr.name);
             }
         }
         Ok(())
@@ -71,9 +78,22 @@ impl Aha {
         } else {
             None
         };
-        let custom = CustomFieldGithub {
-            github_url: pr.url.clone(),
+
+        let count = current
+            .custom_fields
+            .iter()
+            .by_ref()
+            .filter(|cf| cf.name == "Pull Request" && cf.value.len() > 0)
+            .count();
+
+        let custom = if count == 0 {
+            Some(CustomFieldGithub {
+                github_url: pr.url.clone(),
+            })
+        } else {
+            None
         };
+
         let mut status = if let Some(wf) = pr.status_for_labels() {
             Some(WorkflowStatusUpdate { name: wf })
         } else {
@@ -90,7 +110,7 @@ impl Aha {
 
         let feature = FeatureUpdate {
             assigned_to_user: assigned,
-            custom_fields: Some(custom),
+            custom_fields: custom,
             workflow_status: status,
         };
 
@@ -100,7 +120,7 @@ impl Aha {
             println!("puting requirement json: {}", json_string);
         }
 
-        if !self.opt.silent && json_string.len() > 0 {
+        if !self.opt.silent && json_string.len() > 4 {
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
                 .body(&format!("{}", json_string))
@@ -109,7 +129,7 @@ impl Aha {
                 .show()
                 .unwrap();
         }
-        if !self.opt.dry_run {
+        if !self.opt.dry_run && json_string.len() > 4 {
             let response = self.client.put(&uri).json(&feature).send();
             let content = response.unwrap().text();
             let text = &content.unwrap_or("".to_string());
@@ -172,7 +192,7 @@ impl Aha {
         if self.opt.verbose {
             println!("puting feature json: {}", json_string);
         }
-        if !self.opt.silent && json_string.len() > 0 {
+        if !self.opt.silent && json_string.len() > 4 {
             Notification::new()
                 .summary(&format!("Updating feature {}", key))
                 .body(&format!("{:?}", json_string))
@@ -181,7 +201,7 @@ impl Aha {
                 .show()
                 .unwrap();
         }
-        if !self.opt.dry_run {
+        if !self.opt.dry_run && json_string.len() > 4 {
             let response = self.client.put(&uri).json(&feature).send();
             let content = response.unwrap().text();
             let text = &content.unwrap_or("".to_string());
@@ -205,10 +225,10 @@ impl Aha {
 
     pub fn type_from_name(&self, name: &str) -> Option<(String, String)> {
         //could return enum
-        let req = Regex::new(r"^([A-Z]{1,}-\d{1,}-\d{2,})").unwrap();
+        let req = Regex::new(r"^([A-Z]+-\d+-\d+)").unwrap();
         let fet = Regex::new(r"^([A-Z]{1,}-\d{1,})").unwrap();
-        let rc = req.captures(&name);
-        let fc = fet.captures(&name);
+        let rc = req.captures(&name.trim());
+        let fc = fet.captures(&name.trim());
         if let Some(rc) = rc {
             Some(("requirement".to_string(), rc[0].to_string()))
         } else if let Some(fc) = fc {
