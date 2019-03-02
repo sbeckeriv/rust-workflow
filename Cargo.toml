@@ -5,6 +5,8 @@ authors = ["becker <github@deathbyescalator.com>"]
 edition = "2018"
 
 [dependencies]
+dirs = "1"
+toml = "*"
 notify-rust = "3"
 regex = "1"
 failure = "*"

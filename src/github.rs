@@ -14,23 +14,6 @@ pub struct PullRequest {
     pub labels: Vec<String>,
 }
 
-impl PullRequest {
-    pub fn status_for_labels(&self) -> Option<String> {
-        self.labels
-            .iter()
-            .map(|label| match label.as_ref() {
-                "In development" => Some("".to_string()),
-                "Needs code review" => Some("".to_string()),
-                "Needs PM review" => Some("".to_string()),
-                "Ready" => Some("".to_string()),
-                _ => None,
-            })
-            .filter(|label| label.is_some())
-            .nth(1)
-            .unwrap_or(None)
-    }
-}
-
 fn parse_repo_name(repo_name: &str) -> Result<(&str, &str), failure::Error> {
     let mut parts = repo_name.split('/');
     match (parts.next(), parts.next()) {

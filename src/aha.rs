@@ -2,16 +2,47 @@ use super::github;
 use super::Opt;
 use notify_rust::Notification;
 use regex::Regex;
+use std::collections::HashMap;
 
-pub struct Aha {
+pub struct Aha<'a> {
     pub domain: String,
     pub client: reqwest::Client,
     pub user_email: String,
-    pub opt: Opt,
+    pub opt: &'a Opt,
 }
 
-impl Aha {
-    pub fn new(domain: String, auth_token: String, email: String, opt: Opt) -> Aha {
+impl<'a> Aha<'a> {
+    pub fn status_for_labels(
+        &self,
+        labels: Vec<String>,
+        config_labels: Option<HashMap<String, String>>,
+    ) -> Option<String> {
+        let mut default_labels = HashMap::new();
+        default_labels.insert("In development".to_string(), "In development".to_string());
+        default_labels.insert(
+            "Needs code review".to_string(),
+            "In code review".to_string(),
+        );
+        default_labels.insert("Needs PM review".to_string(), "In PM review".to_string());
+        default_labels.insert("Ready".to_string(), "Ready to ship".to_string());
+        labels
+            .iter()
+            .map(|label| {
+                let default = default_labels.get(label);
+                let x = match &config_labels {
+                    Some(c) => c.get(label).or_else(|| default),
+                    None => default,
+                };
+                match x {
+                    Some(c) => Some(c.clone()),
+                    None => None,
+                }
+            })
+            .filter(|label| label.is_some())
+            .nth(1)
+            .unwrap_or(None)
+    }
+    pub fn new(domain: String, auth_token: String, email: String, opt: &Opt) -> Aha {
         let mut headers = reqwest::header::HeaderMap::new();
         let mut auth =
             reqwest::header::HeaderValue::from_str(&format!("Bearer {}", auth_token)).unwrap();
@@ -43,18 +74,23 @@ impl Aha {
         }
     }
 
-    pub fn sync_pr(&self, pr: github::PullRequest) -> Result<(), failure::Error> {
+    pub fn sync_pr(
+        &self,
+        pr: github::PullRequest,
+        labels: Option<HashMap<String, String>>,
+    ) -> Result<(), failure::Error> {
         if let Some((source, key)) = self.type_from_name(&pr.name) {
             if self.opt.verbose {
                 println!("matched {} {} {}", pr.name, source, key);
             }
             if source == "feature" {
                 if let Ok(feature) = self.get_feature(key.clone()) {
-                    self.update_feature(key.clone(), pr, feature).unwrap();
+                    self.update_feature(key.clone(), pr, feature, labels)
+                        .unwrap();
                 }
             } else if source == "requirement" {
                 if let Ok(requirement) = self.get_requirement(key.clone()) {
-                    self.update_requirement(key.clone(), pr, requirement)
+                    self.update_requirement(key.clone(), pr, requirement, labels)
                         .unwrap();
                 }
             }
@@ -71,6 +107,7 @@ impl Aha {
         key: String,
         pr: github::PullRequest,
         current: Requirements,
+        labels: Option<HashMap<String, String>>,
     ) -> Result<(), serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, key);
         let assigned = if current.assigned_to_user.is_none() {
@@ -94,7 +131,7 @@ impl Aha {
             None
         };
 
-        let mut status = if let Some(wf) = pr.status_for_labels() {
+        let mut status = if let Some(wf) = self.status_for_labels(pr.labels, labels) {
             Some(WorkflowStatusUpdate { name: wf })
         } else {
             None
@@ -156,6 +193,7 @@ impl Aha {
         key: String,
         pr: github::PullRequest,
         current_feature: Feature,
+        labels: Option<HashMap<String, String>>,
     ) -> Result<(), serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, key);
         let assigned = if current_feature.assigned_to_user.is_none() {
@@ -166,7 +204,7 @@ impl Aha {
         let custom = CustomFieldGithub {
             github_url: pr.url.clone(),
         };
-        let mut status = if let Some(wf) = pr.status_for_labels() {
+        let mut status = if let Some(wf) = self.status_for_labels(pr.labels, labels) {
             Some(WorkflowStatusUpdate { name: wf })
         } else {
             None
