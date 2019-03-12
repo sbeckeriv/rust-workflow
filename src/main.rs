@@ -1,6 +1,7 @@
 extern crate dirs;
 extern crate dotenv;
 extern crate envy;
+
 #[macro_use]
 extern crate failure;
 #[macro_use]
@@ -72,13 +73,11 @@ fn main() -> Result<(), failure::Error> {
     if !opt.silent {
         println!("{:?}", opt);
     }
+    let home_dir = dirs::home_dir().expect("Could not find home path");
 
     let path_name = match &opt.config_file {
         Some(path) => path.clone(),
-        None => match dirs::home_dir() {
-            Some(path) => format!("{}/.aha_workflow", path.display()),
-            None => "~/.aha_workflow".to_string(),
-        },
+        None => format!("{}/.aha_workflow", home_dir.display()),
     };
 
     if !opt.silent {
@@ -112,7 +111,9 @@ fn main() -> Result<(), failure::Error> {
         }
     };
 
-    dotenv::dotenv().ok();
+    //dotenv::dotenv().ok();
+    let my_path = format!("{}/.env", home_dir.display());
+    dotenv::from_path(my_path).ok();
     env_logger::init();
 
     let mut config: Env = envy::from_env()?;

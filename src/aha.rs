@@ -11,6 +11,10 @@ pub struct Aha<'a> {
     pub opt: &'a Opt,
 }
 
+trait UpdateJson {
+    fn to_json(&self) -> FeatureUpdate;
+}
+
 impl<'a> Aha<'a> {
     pub fn status_for_labels(
         &self,
@@ -160,7 +164,7 @@ impl<'a> Aha<'a> {
         if !self.opt.silent && json_string.len() > 4 {
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
-                .body(&format!("{}", json_string))
+                .body(&format!("{}\n{}", current.url, pr.url.clone()))
                 .icon("firefox")
                 .timeout(0)
                 .show()
@@ -192,11 +196,11 @@ impl<'a> Aha<'a> {
         &self,
         key: String,
         pr: github::PullRequest,
-        current_feature: Feature,
+        current: Feature,
         labels: Option<HashMap<String, String>>,
     ) -> Result<(), serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, key);
-        let assigned = if current_feature.assigned_to_user.is_none() {
+        let assigned = if current.assigned_to_user.is_none() {
             Some(self.user_email.clone())
         } else {
             None
@@ -210,7 +214,7 @@ impl<'a> Aha<'a> {
             None
         };
 
-        let current_status = current_feature.workflow_status.name;
+        let current_status = current.workflow_status.name;
 
         if status.is_none()
             && (current_status == "Ready to develop" || current_status == "Under consideration")
@@ -232,8 +236,8 @@ impl<'a> Aha<'a> {
         }
         if !self.opt.silent && json_string.len() > 4 {
             Notification::new()
-                .summary(&format!("Updating feature {}", key))
-                .body(&format!("{:?}", json_string))
+                .summary(&format!("Updating requirement {}", key))
+                .body(&format!("{}\n{}", current.url, pr.url.clone()))
                 .icon("firefox")
                 .timeout(0)
                 .show()
