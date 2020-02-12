@@ -88,14 +88,18 @@ impl<'a> Aha<'a> {
                 println!("matched {} {} {}", pr.name, source, key);
             }
             if source == "feature" {
-                if let Ok(feature) = self.get_feature(key.clone()) {
-                    self.update_feature(key.clone(), pr, feature, labels)
-                        .unwrap();
+                match self.get_feature(key.clone()) {
+                    Ok(feature) => self
+                        .update_feature(key.clone(), pr, feature, labels)
+                        .unwrap(),
+                    Err(error) => println!("Error feature: {}", error),
                 }
             } else if source == "requirement" {
-                if let Ok(requirement) = self.get_requirement(key.clone()) {
-                    self.update_requirement(key.clone(), pr, requirement, labels)
-                        .unwrap();
+                match self.get_requirement(key.clone()) {
+                    Ok(requirement) => self
+                        .update_requirement(key.clone(), pr, requirement, labels)
+                        .unwrap(),
+                    Err(error) => println!("Error feature: {}", error),
                 }
             }
         } else {
@@ -124,7 +128,7 @@ impl<'a> Aha<'a> {
             .custom_fields
             .iter()
             .by_ref()
-            .filter(|cf| cf.name == "Pull Request" && cf.value.len() > 0)
+            .filter(|cf| cf.name == "Pull Request")
             .count();
 
         let custom = if count == 0 {
@@ -342,11 +346,21 @@ pub struct Attachments {
     file_size: i64,
 }
 
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomField {
+    pub key: String,
+    pub name: String,
+    pub value: Option<String>,
+    #[serde(rename = "type")]
+    pub type_field: String,
+}
+
 #[derive(Serialize, Debug, Deserialize)]
 pub struct CustomFields {
     key: String,
     name: String,
-    value: String,
+    value: Option<String>,
     #[serde(rename = "type")]
     _type: String,
 }
