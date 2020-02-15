@@ -2,6 +2,7 @@ use super::github;
 use super::Opt;
 use notify_rust::Notification;
 use regex::Regex;
+use serde_json::Value;
 use std::collections::HashMap;
 
 pub struct Aha<'a> {
@@ -88,14 +89,14 @@ impl<'a> Aha<'a> {
                 println!("matched {} {} {}", pr.name, source, key);
             }
             if source == "feature" {
-                match self.get_feature(key.clone()) {
+                match self.get_json(key.clone(), "feature".to_string()) {
                     Ok(feature) => self
                         .update_feature(key.clone(), pr, feature, labels)
                         .unwrap(),
                     Err(error) => println!("Error feature: {}", error),
                 }
             } else if source == "requirement" {
-                match self.get_requirement(key.clone()) {
+                match self.get_json(key.clone(), "requirement".to_string()) {
                     Ok(requirement) => self
                         .update_requirement(key.clone(), pr, requirement, labels)
                         .unwrap(),
@@ -114,21 +115,22 @@ impl<'a> Aha<'a> {
         &self,
         key: String,
         pr: github::PullRequest,
-        current: Requirements,
+        current: Value,
         labels: Option<HashMap<String, String>>,
     ) -> Result<(), serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, key);
-        let assigned = if current.assigned_to_user.is_none() {
+        let assigned = if current["assigned_to_user"].is_null() {
             Some(self.user_email.clone())
         } else {
             None
         };
 
-        let count = current
-            .custom_fields
+        let count = current["custom_fields"]
+            .as_array()
+            .unwrap()
             .iter()
             .by_ref()
-            .filter(|cf| cf.name == "Pull Request")
+            .filter(|cf| cf["name"] == "Pull Request")
             .count();
 
         let custom = if count == 0 {
@@ -144,7 +146,7 @@ impl<'a> Aha<'a> {
         } else {
             None
         };
-        let current_status = current.workflow_status.name;
+        let current_status = &current["workflow_status"]["name"];
         if status.is_none()
             && (current_status == "Ready to develop" || current_status == "Under consideration")
         {
@@ -168,7 +170,7 @@ impl<'a> Aha<'a> {
         if !self.opt.silent && json_string.len() > 4 {
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
-                .body(&format!("{}\n{}", current.url, pr.url.clone()))
+                .body(&format!("{}\n{}", current["url"], pr.url.clone()))
                 .icon("firefox")
                 .timeout(0)
                 .show()
@@ -181,7 +183,8 @@ impl<'a> Aha<'a> {
             if self.opt.verbose {
                 println!("updated requirement {:?}", text);
             }
-            let feature: Result<RequirementRootInterface, _> = serde_json::from_str(&text);
+            let feature: Result<Value, _> = serde_json::from_str(&text);
+
             if let Ok(_) = feature {
                 Ok(())
             } else {
@@ -200,11 +203,11 @@ impl<'a> Aha<'a> {
         &self,
         key: String,
         pr: github::PullRequest,
-        current: Feature,
+        current: Value,
         labels: Option<HashMap<String, String>>,
     ) -> Result<(), serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, key);
-        let assigned = if current.assigned_to_user.is_none() {
+        let assigned = if current["assigned_to_user"].is_null() {
             Some(self.user_email.clone())
         } else {
             None
@@ -218,7 +221,7 @@ impl<'a> Aha<'a> {
             None
         };
 
-        let current_status = current.workflow_status.name;
+        let current_status = &current["workflow_status"]["name"];
 
         if status.is_none()
             && (current_status == "Ready to develop" || current_status == "Under consideration")
@@ -241,7 +244,7 @@ impl<'a> Aha<'a> {
         if !self.opt.silent && json_string.len() > 4 {
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
-                .body(&format!("{}\n{}", current.url, pr.url.clone()))
+                .body(&format!("{}\n{}", current["url"], pr.url.clone()))
                 .icon("firefox")
                 .timeout(0)
                 .show()
@@ -254,7 +257,8 @@ impl<'a> Aha<'a> {
             if self.opt.verbose {
                 println!("updated feature {:?}", text);
             }
-            let feature: Result<FeatureRootInterface, _> = serde_json::from_str(&text);
+            let feature: Result<Value, _> = serde_json::from_str(&text);
+
             if let Ok(_) = feature {
                 Ok(())
             } else {
@@ -284,95 +288,27 @@ impl<'a> Aha<'a> {
         }
     }
 
-    pub fn get_requirement(&self, url: String) -> Result<Requirements, serde_json::Error> {
-        let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, url);
+    pub fn get_json(&self, url: String, base: String) -> Result<Value, serde_json::Error> {
+        let uri = format!("https://{}.aha.io/api/v1/{}/{}", self.domain, base, url);
         if self.opt.verbose {
-            println!("requirement url: {}", uri);
+            println!("{} url: {}", base, uri);
         }
         let response = self.client.get(&uri).send();
         let content = response.unwrap().text();
         if self.opt.verbose {
-            println!("{:?}", content);
+            println!("{} text {:?}", base, content);
         }
-        let requirement: Result<RequirementRootInterface, _> =
-            serde_json::from_str(&content.unwrap_or("".to_string()));
-        if let Ok(req) = requirement {
-            Ok(req.requirement)
+        let feature: Result<Value, _> = serde_json::from_str(&content.unwrap_or("".to_string()));
+        if let Ok(mut fe) = feature {
+            Ok(fe[base].take())
         } else {
-            let ex: Result<Requirements, serde_json::Error> = Err(requirement.unwrap_err());
-            ex
-        }
-    }
-
-    pub fn get_feature(&self, url: String) -> Result<Feature, serde_json::Error> {
-        let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, url);
-        if self.opt.verbose {
-            println!("Feature url: {}", uri);
-        }
-        let response = self.client.get(&uri).send();
-        let content = response.unwrap().text();
-        if self.opt.verbose {
-            println!("Feature text {:?}", content);
-        }
-        let feature: Result<FeatureRootInterface, _> =
-            serde_json::from_str(&content.unwrap_or("".to_string()));
-        if let Ok(fe) = feature {
-            Ok(fe.feature)
-        } else {
-            let ex: Result<Feature, serde_json::Error> = Err(feature.unwrap_err());
+            let ex: Result<Value, serde_json::Error> = Err(feature.unwrap_err());
             ex
         }
     }
 }
 
-#[derive(Serialize, Debug, Deserialize)]
-pub struct AssignedToUser {
-    id: String,
-    name: String,
-    email: String,
-    created_at: String,
-    updated_at: String,
-    default_assignee: bool,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Attachments {
-    id: String,
-    download_url: String,
-    created_at: String,
-    updated_at: String,
-    content_type: String,
-    file_name: String,
-    file_size: i64,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CustomField {
-    pub key: String,
-    pub name: String,
-    pub value: Option<String>,
-    #[serde(rename = "type")]
-    pub type_field: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct CustomFields {
-    key: String,
-    name: String,
-    value: Option<String>,
-    #[serde(rename = "type")]
-    _type: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Description {
-    id: String,
-    body: String,
-    created_at: String,
-    attachments: Vec<Attachments>,
-}
-
+// keep
 #[derive(Serialize, Debug, Deserialize)]
 pub struct FeatureUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -382,204 +318,14 @@ pub struct FeatureUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     workflow_status: Option<WorkflowStatusUpdate>,
 }
-
+//keep
 #[derive(Serialize, Debug, Deserialize)]
 pub struct WorkflowStatusUpdate {
     name: String,
 }
-
+// kepp
 #[derive(Serialize, Debug, Deserialize)]
 pub struct CustomFieldGithub {
     #[serde(rename = "pull_request")]
     github_url: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Feature {
-    id: String,
-    name: String,
-    reference_num: String,
-    position: i64,
-    score: i64,
-    created_at: String,
-    updated_at: String,
-    start_date: Option<String>,
-    due_date: Option<String>,
-    product_id: String,
-    workflow_kind: WorkflowKind,
-    workflow_status: WorkflowStatus,
-    description: Description,
-    attachments: Vec<Attachments>,
-    integration_fields: Vec<IntegrationFields>,
-    url: String,
-    resource: String,
-    release: Release,
-    master_feature: Option<MasterFeature>,
-    created_by_user: Owner,
-    assigned_to_user: Option<AssignedToUser>,
-    requirements: Vec<Requirements>,
-    initiative: Option<Initiative>,
-    goals: Vec<Goals>,
-    comments_count: i64,
-    score_facts: Vec<ScoreFacts>,
-    tags: Vec<String>,
-    full_tags: Vec<FullTags>,
-    custom_fields: Vec<CustomFields>,
-    feature_links: Vec<FeatureLinks>,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct ScoreFacts {
-    name: String,
-    value: i64,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Feature1 {
-    id: String,
-    reference_num: String,
-    name: String,
-    created_at: String,
-    url: String,
-    resource: String,
-    product_id: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct FeatureLinks {
-    link_type: String,
-    link_type_id: String,
-    created_at: String,
-    parent_record: Feature1,
-    child_record: Feature1,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct FullTags {
-    id: i64,
-    name: String,
-    color: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Goals {
-    id: String,
-    name: String,
-    url: String,
-    resource: String,
-    created_at: String,
-    description: Description,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Initiative {
-    id: String,
-    name: String,
-    url: String,
-    resource: String,
-    created_at: String,
-    description: Description,
-    integration_fields: Vec<IntegrationFields>,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct IntegrationFields {
-    id: String,
-    name: String,
-    value: Option<String>,
-    integration_id: String,
-    service_name: String,
-    created_at: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct MasterFeature {
-    id: String,
-    reference_num: String,
-    name: String,
-    created_at: String,
-    url: String,
-    resource: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Owner {
-    id: String,
-    name: String,
-    email: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Project {
-    id: String,
-    reference_prefix: String,
-    name: String,
-    product_line: bool,
-    created_at: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Release {
-    id: String,
-    reference_num: String,
-    name: String,
-    start_date: String,
-    release_date: String,
-    parking_lot: bool,
-    created_at: String,
-    product_id: String,
-    integration_fields: Vec<IntegrationFields>,
-    url: String,
-    resource: String,
-    owner: Owner,
-    project: Project,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct Requirements {
-    id: String,
-    name: String,
-    reference_num: String,
-    position: i64,
-    created_at: String,
-    updated_at: String,
-    release_id: String,
-    workflow_status: WorkflowStatus,
-    url: String,
-    resource: String,
-    description: Description,
-    feature: Feature1,
-    assigned_to_user: Option<AssignedToUser>,
-    created_by_user: Owner,
-    attachments: Vec<Attachments>,
-    custom_fields: Vec<CustomFields>,
-    integration_fields: Vec<IntegrationFields>,
-    comments_count: i64,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct RequirementRootInterface {
-    requirement: Requirements,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct FeatureRootInterface {
-    feature: Feature,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct WorkflowKind {
-    id: String,
-    name: String,
-}
-
-#[derive(Serialize, Debug, Deserialize)]
-pub struct WorkflowStatus {
-    id: String,
-    name: String,
-    position: i64,
-    complete: bool,
-    color: String,
 }
