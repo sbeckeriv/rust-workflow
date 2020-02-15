@@ -110,30 +110,31 @@ impl<'a> Aha<'a> {
         }
         Ok(())
     }
-
-    pub fn update_requirement(
+    pub fn generate_update_function(
         &self,
-        key: String,
-        pr: github::PullRequest,
-        current: Value,
-        labels: Option<HashMap<String, String>>,
-    ) -> Result<(), serde_json::Error> {
-        let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, key);
+        current: &Value,
+        pr: &github::PullRequest,
+        status: Option<String>,
+    ) -> FeatureUpdate {
         let assigned = if current["assigned_to_user"].is_null() {
             Some(self.user_email.clone())
         } else {
             None
         };
 
-        let count = current["custom_fields"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .by_ref()
-            .filter(|cf| cf["name"] == "Pull Request")
-            .count();
+        let count = if current["custom_fields"].is_null() {
+            0
+        } else {
+            current["custom_fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .by_ref()
+                .filter(|cf| cf["name"] == "Pull Request")
+                .count()
+        };
 
-        let custom = if count == 0 {
+        let custom = if count > 0 {
             Some(CustomFieldGithub {
                 github_url: pr.url.clone(),
             })
@@ -141,7 +142,7 @@ impl<'a> Aha<'a> {
             None
         };
 
-        let mut status = if let Some(wf) = self.status_for_labels(pr.labels, labels) {
+        let mut status = if let Some(wf) = status {
             Some(WorkflowStatusUpdate { name: wf })
         } else {
             None
@@ -155,12 +156,23 @@ impl<'a> Aha<'a> {
             })
         }
 
-        let feature = FeatureUpdate {
+        FeatureUpdate {
             assigned_to_user: assigned,
             custom_fields: custom,
             workflow_status: status,
-        };
+        }
+    }
 
+    pub fn update_requirement(
+        &self,
+        key: String,
+        pr: github::PullRequest,
+        current: Value,
+        labels: Option<HashMap<String, String>>,
+    ) -> Result<(), serde_json::Error> {
+        let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, key);
+        let status = self.status_for_labels(pr.labels.clone(), labels);
+        let feature = self.generate_update_function(&current, &pr, status);
         let json_string = serde_json::to_string(&feature)?;
 
         if self.opt.verbose {
@@ -207,36 +219,8 @@ impl<'a> Aha<'a> {
         labels: Option<HashMap<String, String>>,
     ) -> Result<(), serde_json::Error> {
         let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, key);
-        let assigned = if current["assigned_to_user"].is_null() {
-            Some(self.user_email.clone())
-        } else {
-            None
-        };
-        let custom = CustomFieldGithub {
-            github_url: pr.url.clone(),
-        };
-        let mut status = if let Some(wf) = self.status_for_labels(pr.labels, labels) {
-            Some(WorkflowStatusUpdate { name: wf })
-        } else {
-            None
-        };
-
-        let current_status = &current["workflow_status"]["name"];
-
-        if status.is_none()
-            && (current_status == "Ready to develop" || current_status == "Under consideration")
-        {
-            status = Some(WorkflowStatusUpdate {
-                name: "In code review".to_string(),
-            })
-        }
-
-        let feature = FeatureUpdate {
-            assigned_to_user: assigned,
-            custom_fields: Some(custom),
-            workflow_status: status,
-        };
-
+        let status = self.status_for_labels(pr.labels.clone(), labels);
+        let feature = self.generate_update_function(&current, &pr, status);
         let json_string = serde_json::to_string(&feature)?;
         if self.opt.verbose {
             println!("puting feature json: {}", json_string);
