@@ -12,10 +12,6 @@ pub struct Aha<'a> {
     pub opt: &'a Opt,
 }
 
-trait UpdateJson {
-    fn to_json(&self) -> FeatureUpdate;
-}
-
 impl<'a> Aha<'a> {
     pub fn status_for_labels(
         &self,
@@ -88,20 +84,12 @@ impl<'a> Aha<'a> {
             if self.opt.verbose {
                 println!("matched {} {} {}", pr.name, source, key);
             }
-            if source == "feature" {
-                match self.get_json(key.clone(), "feature".to_string()) {
-                    Ok(feature) => self
-                        .update_feature(key.clone(), pr, feature, labels)
-                        .unwrap(),
-                    Err(error) => println!("Error feature: {}", error),
-                }
-            } else if source == "requirement" {
-                match self.get_json(key.clone(), "requirement".to_string()) {
-                    Ok(requirement) => self
-                        .update_requirement(key.clone(), pr, requirement, labels)
-                        .unwrap(),
-                    Err(error) => println!("Error feature: {}", error),
-                }
+
+            match self.get_json(key.clone(), source.to_string()) {
+                Ok(feature) => self
+                    .update_aha(key.clone(), pr, feature, labels, source.to_string())
+                    .unwrap(),
+                Err(error) => println!("Error {}: {}", source, error),
             }
         } else {
             if self.opt.verbose {
@@ -163,23 +151,23 @@ impl<'a> Aha<'a> {
         }
     }
 
-    pub fn update_requirement(
+    pub fn update_aha(
         &self,
         key: String,
         pr: github::PullRequest,
         current: Value,
         labels: Option<HashMap<String, String>>,
+        base: String,
     ) -> Result<(), serde_json::Error> {
-        let uri = format!("https://{}.aha.io/api/v1/requirements/{}", self.domain, key);
+        let uri = format!("https://{}.aha.io/api/v1/{}/{}", self.domain, base, key);
         let status = self.status_for_labels(pr.labels.clone(), labels);
         let feature = self.generate_update_function(&current, &pr, status);
         let json_string = serde_json::to_string(&feature)?;
-
         if self.opt.verbose {
-            println!("puting requirement json: {}", json_string);
+            println!("puting {} json: {}", base, json_string);
         }
-
         if !self.opt.silent && json_string.len() > 4 {
+            println!("puting {} json: {}", current, json_string);
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
                 .body(&format!("{}\n{}", current["url"], pr.url.clone()))
@@ -193,53 +181,7 @@ impl<'a> Aha<'a> {
             let content = response.unwrap().text();
             let text = &content.unwrap_or("".to_string());
             if self.opt.verbose {
-                println!("updated requirement {:?}", text);
-            }
-            let feature: Result<Value, _> = serde_json::from_str(&text);
-
-            if let Ok(_) = feature {
-                Ok(())
-            } else {
-                if self.opt.verbose {
-                    println!("json failed to parse {:?}", text);
-                }
-                let ex: Result<(), serde_json::Error> = Err(feature.unwrap_err());
-                ex
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn update_feature(
-        &self,
-        key: String,
-        pr: github::PullRequest,
-        current: Value,
-        labels: Option<HashMap<String, String>>,
-    ) -> Result<(), serde_json::Error> {
-        let uri = format!("https://{}.aha.io/api/v1/features/{}", self.domain, key);
-        let status = self.status_for_labels(pr.labels.clone(), labels);
-        let feature = self.generate_update_function(&current, &pr, status);
-        let json_string = serde_json::to_string(&feature)?;
-        if self.opt.verbose {
-            println!("puting feature json: {}", json_string);
-        }
-        if !self.opt.silent && json_string.len() > 4 {
-            Notification::new()
-                .summary(&format!("Updating requirement {}", key))
-                .body(&format!("{}\n{}", current["url"], pr.url.clone()))
-                .icon("firefox")
-                .timeout(0)
-                .show()
-                .unwrap();
-        }
-        if !self.opt.dry_run && json_string.len() > 4 {
-            let response = self.client.put(&uri).json(&feature).send();
-            let content = response.unwrap().text();
-            let text = &content.unwrap_or("".to_string());
-            if self.opt.verbose {
-                println!("updated feature {:?}", text);
+                println!("updated {} {:?}", base, text);
             }
             let feature: Result<Value, _> = serde_json::from_str(&text);
 
@@ -273,7 +215,8 @@ impl<'a> Aha<'a> {
     }
 
     pub fn get_json(&self, url: String, base: String) -> Result<Value, serde_json::Error> {
-        let uri = format!("https://{}.aha.io/api/v1/{}/{}", self.domain, base, url);
+        let api_base = format!("{}{}", base, "s");
+        let uri = format!("https://{}.aha.io/api/v1/{}/{}", self.domain, api_base, url);
         if self.opt.verbose {
             println!("{} url: {}", base, uri);
         }
