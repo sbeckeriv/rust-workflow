@@ -38,6 +38,8 @@ pub struct Opt {
     verbose: bool,
     #[structopt(short = "c", long = "config")]
     config_file: Option<String>,
+    #[structopt(short = "g", long = "generate")]
+    generate: bool,
 }
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -70,7 +72,7 @@ struct Env {
 
 fn main() -> Result<(), failure::Error> {
     let opt = Opt::from_args();
-    if !opt.silent {
+    if opt.verbose {
         println!("{:?}", opt);
     }
     let home_dir = dirs::home_dir().expect("Could not find home path");
@@ -80,13 +82,13 @@ fn main() -> Result<(), failure::Error> {
         None => format!("{}/.aha_workflow", home_dir.display()),
     };
 
-    if !opt.silent {
+    if opt.verbose {
         println!("{:?}", path_name);
     }
     let config_path = fs::canonicalize(&path_name);
     let config_info: Option<Config> = match config_path {
         Ok(path) => {
-            if !opt.silent {
+            if opt.verbose {
                 println!("found {:?}", path_name);
             }
             let display = path.display();
@@ -129,7 +131,7 @@ fn main() -> Result<(), failure::Error> {
         _ => (),
     }
 
-    if !opt.silent {
+    if opt.verbose {
         println!("config updated");
     }
     let repos = match config_info {
@@ -144,7 +146,7 @@ fn main() -> Result<(), failure::Error> {
         }],
     };
 
-    if !opt.silent {
+    if opt.verbose {
         println!("{:?}", repos);
     }
 
@@ -157,18 +159,22 @@ fn main() -> Result<(), failure::Error> {
         config.workflow_email,
         &opt,
     );
-    for repo in repos {
-        let labels = repo.labels;
-        let github = github::GithubEnv {
-            github_api_token: config.github_api_token.clone(),
-            workflow_repo: repo.name.clone(),
-            workflow_login: repo.username.clone(),
-            silent: silent,
-            verbose: verbose.clone(),
-        };
-        let list = github::prs(github).unwrap();
-        for pr in list {
-            aha.sync_pr(pr, labels.clone()).unwrap();
+    if opt.generate {
+        aha.generate().unwrap();
+    } else {
+        for repo in repos {
+            let labels = repo.labels;
+            let github = github::GithubEnv {
+                github_api_token: config.github_api_token.clone(),
+                workflow_repo: repo.name.clone(),
+                workflow_login: repo.username.clone(),
+                silent: silent,
+                verbose: verbose.clone(),
+            };
+            let list = github::prs(github).unwrap();
+            for pr in list {
+                aha.sync_pr(pr, labels.clone()).unwrap();
+            }
         }
     }
     Ok(())
