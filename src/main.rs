@@ -1,7 +1,7 @@
 extern crate dirs;
 extern crate dotenv;
 extern crate envy;
-
+extern crate termion;
 #[macro_use]
 extern crate failure;
 #[macro_use]
@@ -160,7 +160,21 @@ fn main() -> Result<(), failure::Error> {
         &opt,
     );
     if opt.generate {
-        aha.generate().unwrap();
+        let feature = aha.generate().unwrap()["feature"].take();
+        println!(
+            "{} {}",
+            feature["reference_num"].as_str().unwrap(),
+            feature["url"].as_str().unwrap()
+        );
+        println!(
+            "git stash; git co master; git co -b {}-{}",
+            feature["reference_num"].as_str().unwrap(),
+            feature["name"].as_str().unwrap().to_lowercase().replacen(
+                char::is_whitespace,
+                "-",
+                300
+            )
+        );
     } else {
         for repo in repos {
             let labels = repo.labels;

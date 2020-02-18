@@ -8,6 +8,8 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::process::Command;
+use termion::clear;
+use termion::cursor;
 use text_io::read;
 use url::Url;
 
@@ -17,15 +19,21 @@ pub struct Aha<'a> {
     pub user_email: String,
     pub opt: &'a Opt,
 }
-pub struct Request {
-    pub base: String,
-}
 
 impl<'a> Aha<'a> {
     pub fn generate(&self) -> Result<Value, serde_json::Error> {
+        self.reset_screen();
         println!("Enter feature name:");
-        let name: String = read!();
-        let mut feature = self.create_feature(name).unwrap()["feature"].take();
+        let name: String = read!("{}\n");
+        self.reset_screen();
+
+        println!("Release notes?:");
+        println!("0) No");
+        println!("1) Yes");
+        let notes: i8 = read!();
+        self.reset_screen();
+
+        let mut feature = self.create_feature(name, notes).unwrap()["feature"].take();
 
         let feature_url = self
             .url_builder()
@@ -54,12 +62,15 @@ impl<'a> Aha<'a> {
             assigned_to_user: Some(self.user_email.clone()),
             custom_fields: None,
             workflow_status: Some(WorkflowStatusUpdate {
-                name: "In code review".to_string(),
+                name: "In development".to_string(),
             }),
         };
 
         let json_string = serde_json::to_string(&update)?;
-        println!("puting json: {}", json_string);
+
+        if self.opt.verbose {
+            println!("puting json: {}", json_string);
+        }
         let response = self
             .client
             .put(&feature_url.to_string())
@@ -67,7 +78,9 @@ impl<'a> Aha<'a> {
             .send();
         let content = response.unwrap().text();
         let text = &content.unwrap_or("".to_string());
-        println!("updated {:?}", text);
+        if self.opt.verbose {
+            println!("updated {:?}", text);
+        }
         let feature: Result<Value, _> = serde_json::from_str(&text);
 
         if let Ok(f) = feature {
@@ -220,8 +233,16 @@ impl<'a> Aha<'a> {
             workflow_status: status,
         }
     }
-
-    pub fn create_feature(&self, name: String) -> Result<Value, serde_json::Error> {
+    pub fn reset_screen(&self) {
+        if !self.opt.verbose {
+            print!(
+                "{clear}{goto}",
+                clear = clear::All,
+                goto = cursor::Goto(1, 1)
+            );
+        }
+    }
+    pub fn create_feature(&self, name: String, notes: i8) -> Result<Value, serde_json::Error> {
         let projects_url = self.url_builder().join("products").unwrap();
         let projects = self.get(projects_url, "products".to_string()).unwrap();
         let projects = projects.as_array().unwrap();
@@ -230,6 +251,7 @@ impl<'a> Aha<'a> {
         }
         println!("Choose a product:");
         let index: usize = read!();
+        self.reset_screen();
 
         let releases_url = self
             .url_builder()
@@ -246,12 +268,21 @@ impl<'a> Aha<'a> {
         }
         println!("Choose a release:");
         let index: usize = read!();
+        self.reset_screen();
 
         let uri = format!("https://{}.aha.io/api/v1/features", self.domain);
+        let notes_required = if notes == 1 {
+            Some(CustomNotes {
+                notes: "Required".to_string(),
+            })
+        } else {
+            None
+        };
 
         let feature = FeatureCreate {
             name: name,
             release_id: releases[index]["id"].as_str().unwrap().to_string(),
+            custom_fields: notes_required,
         };
         let json_string = serde_json::to_string(&feature)?;
         if self.opt.verbose {
@@ -367,6 +398,8 @@ impl<'a> Aha<'a> {
 pub struct FeatureCreate {
     name: String,
     release_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_fields: Option<CustomNotes>,
 }
 
 // keep
@@ -396,6 +429,13 @@ pub struct FeatureUpdate {
 #[derive(Serialize, Debug, Deserialize)]
 pub struct WorkflowStatusUpdate {
     pub name: String,
+}
+
+// kepp
+#[derive(Serialize, Debug, Deserialize)]
+pub struct CustomNotes {
+    #[serde(rename = "release_notes1")]
+    notes: String,
 }
 // kepp
 #[derive(Serialize, Debug, Deserialize)]
