@@ -151,10 +151,10 @@ impl<'a> Aha<'a> {
             .build()
             .unwrap();
         Aha {
-            client: client,
-            domain: domain,
+            client,
+            domain,
             user_email: email,
-            opt: opt,
+            opt,
         }
     }
 
@@ -170,15 +170,13 @@ impl<'a> Aha<'a> {
 
             match self.get_json(key.clone(), source.to_string()) {
                 Ok(feature) => self
-                    .update_aha(key.clone(), pr, feature, labels, source.to_string())
+                    .update_aha(key, pr, feature, labels, source)
                     .unwrap(),
                 Err(error) => println!("Error {}: {}", source, error),
             }
-        } else {
-            if self.opt.verbose {
-                println!("Did not match {}", pr.name);
-            }
-        }
+        } else if self.opt.verbose {
+    println!("Did not match {}", pr.name);
+}
         Ok(())
     }
     pub fn generate_update_function(
@@ -280,7 +278,7 @@ impl<'a> Aha<'a> {
         };
 
         let feature = FeatureCreate {
-            name: name,
+            name,
             release_id: releases[index]["id"].as_str().unwrap().to_string(),
             custom_fields: notes_required,
         };
@@ -316,7 +314,7 @@ impl<'a> Aha<'a> {
         if !self.opt.silent && json_string.len() > 4 && !current["url"].is_null() {
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
-                .body(&format!("{}\n{}", current["url"], pr.url.clone()))
+                .body(&format!("{}\n{}", current["url"], pr.url))
                 .icon("firefox")
                 .timeout(0)
                 .show()
@@ -383,7 +381,7 @@ impl<'a> Aha<'a> {
         let uri = format!("https://{}.aha.io/api/v1/", self.domain);
         let url = Url::parse(&uri).unwrap();
 
-        let api_url = if end_path.len() > 0 {
+        let api_url = if !end_path.is_empty() {
             format!("/{}", end_path)
         } else {
             "".to_string()

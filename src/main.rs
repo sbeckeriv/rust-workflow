@@ -182,7 +182,7 @@ fn main() -> Result<(), failure::Error> {
                 github_api_token: config.github_api_token.clone(),
                 workflow_repo: repo.name.clone(),
                 workflow_login: repo.username.clone(),
-                silent: silent,
+                silent,
                 verbose: verbose.clone(),
             };
             let list = github::prs(github).unwrap();
