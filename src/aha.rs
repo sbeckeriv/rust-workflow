@@ -4,6 +4,14 @@ use notify_rust::Notification;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::BufReader;
+use std::process::Command;
+use termion::clear;
+use termion::cursor;
+use text_io::read;
+use url::Url;
 
 pub struct Aha<'a> {
     pub domain: String,
@@ -13,6 +21,81 @@ pub struct Aha<'a> {
 }
 
 impl<'a> Aha<'a> {
+    pub fn generate(&self) -> Result<Value, serde_json::Error> {
+        self.reset_screen();
+        println!("Enter feature name:");
+        let name: String = read!("{}\n");
+        self.reset_screen();
+
+        println!("Release notes?:");
+        println!("0) No");
+        println!("1) Yes");
+        let notes: i8 = read!();
+        self.reset_screen();
+
+        let mut feature = self.create_feature(name, notes).unwrap()["feature"].take();
+
+        let feature_url = self
+            .url_builder()
+            .join("features/")
+            .unwrap()
+            .join(feature["id"].as_str().unwrap())
+            .unwrap();
+        let description = feature["feature"]["description"]["body"].take();
+        if !description.is_null() {
+            {
+                let mut file = File::create("/tmp/rust-workflow").unwrap();
+                file.write_all(description.to_string().as_bytes()).unwrap();
+            }
+        }
+        Command::new("nvim")
+            .arg("/tmp/rust-workflow")
+            .status()
+            .expect("Something went wrong.");
+        let file = File::open("/tmp/rust-workflow").unwrap();
+        let mut buf_reader = BufReader::new(file);
+        let mut contents = String::new();
+        buf_reader.read_to_string(&mut contents).unwrap();
+
+        let update = FeatureUpdateCreate {
+            description: Some(contents),
+            assigned_to_user: Some(self.user_email.clone()),
+            custom_fields: None,
+            workflow_status: Some(WorkflowStatusUpdate {
+                name: "In development".to_string(),
+            }),
+        };
+
+        let json_string = serde_json::to_string(&update)?;
+
+        if self.opt.verbose {
+            println!("puting json: {}", json_string);
+        }
+        let response = self
+            .client
+            .put(&feature_url.to_string())
+            .json(&update)
+            .send();
+        let content = response.unwrap().text();
+        let text = &content.unwrap_or("".to_string());
+        if self.opt.verbose {
+            println!("updated {:?}", text);
+        }
+        let feature: Result<Value, _> = serde_json::from_str(&text);
+
+        if let Ok(f) = feature {
+            Ok(f)
+        } else {
+            println!("json failed to parse {:?}", text);
+            let ex: Result<_, serde_json::Error> = Err(feature.unwrap_err());
+            ex
+        }
+    }
+    pub fn url_builder(&self) -> Url {
+        let uri = format!("https://{}.aha.io/api/v1/", self.domain);
+        Url::parse(&uri).unwrap()
+    }
+
     pub fn status_for_labels(
         &self,
         labels: Vec<String>,
@@ -68,10 +151,10 @@ impl<'a> Aha<'a> {
             .build()
             .unwrap();
         Aha {
-            client: client,
-            domain: domain,
+            client,
+            domain,
             user_email: email,
-            opt: opt,
+            opt,
         }
     }
 
@@ -87,15 +170,13 @@ impl<'a> Aha<'a> {
 
             match self.get_json(key.clone(), source.to_string()) {
                 Ok(feature) => self
-                    .update_aha(key.clone(), pr, feature, labels, source.to_string())
+                    .update_aha(key, pr, feature, labels, source)
                     .unwrap(),
                 Err(error) => println!("Error {}: {}", source, error),
             }
-        } else {
-            if self.opt.verbose {
-                println!("Did not match {}", pr.name);
-            }
-        }
+        } else if self.opt.verbose {
+    println!("Did not match {}", pr.name);
+}
         Ok(())
     }
     pub fn generate_update_function(
@@ -150,6 +231,70 @@ impl<'a> Aha<'a> {
             workflow_status: status,
         }
     }
+    pub fn reset_screen(&self) {
+        if !self.opt.verbose {
+            print!(
+                "{clear}{goto}",
+                clear = clear::All,
+                goto = cursor::Goto(1, 1)
+            );
+        }
+    }
+    pub fn create_feature(&self, name: String, notes: i8) -> Result<Value, serde_json::Error> {
+        let projects_url = self.url_builder().join("products").unwrap();
+        let projects = self.get(projects_url, "products".to_string()).unwrap();
+        let projects = projects.as_array().unwrap();
+        for (index, project) in projects.iter().enumerate() {
+            println!("{}) {} ({})", index, project["name"], project["id"]);
+        }
+        println!("Choose a product:");
+        let index: usize = read!();
+        self.reset_screen();
+
+        let releases_url = self
+            .url_builder()
+            .join("products/")
+            .unwrap()
+            .join(&format!("{}/", projects[index]["id"].as_str().unwrap()))
+            .unwrap()
+            .join("releases")
+            .unwrap();
+        let releases = self.get(releases_url, "releases".to_string()).unwrap();
+        let releases = releases.as_array().unwrap();
+        for (index, release) in releases.iter().enumerate() {
+            println!("{}) {} ({})", index, release["name"], release["id"]);
+        }
+        println!("Choose a release:");
+        let index: usize = read!();
+        self.reset_screen();
+
+        let uri = format!("https://{}.aha.io/api/v1/features", self.domain);
+        let notes_required = if notes == 1 {
+            Some(CustomNotes {
+                notes: "Required".to_string(),
+            })
+        } else {
+            None
+        };
+
+        let feature = FeatureCreate {
+            name,
+            release_id: releases[index]["id"].as_str().unwrap().to_string(),
+            custom_fields: notes_required,
+        };
+        let json_string = serde_json::to_string(&feature)?;
+        if self.opt.verbose {
+            println!("creating feature json: {}", json_string);
+        }
+        let response = self.client.post(&uri).json(&feature).send();
+        let content = response.unwrap().text();
+        let text = &content.unwrap_or("".to_string());
+        if self.opt.verbose {
+            println!("created {:?}", text);
+        }
+
+        serde_json::from_str(&text)
+    }
 
     pub fn update_aha(
         &self,
@@ -166,11 +311,10 @@ impl<'a> Aha<'a> {
         if self.opt.verbose {
             println!("puting {} json: {}", base, json_string);
         }
-        if !self.opt.silent && json_string.len() > 4 {
-            println!("puting {} json: {}", current, json_string);
+        if !self.opt.silent && json_string.len() > 4 && !current["url"].is_null() {
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
-                .body(&format!("{}\n{}", current["url"], pr.url.clone()))
+                .body(&format!("{}\n{}", current["url"], pr.url))
                 .icon("firefox")
                 .timeout(0)
                 .show()
@@ -214,9 +358,8 @@ impl<'a> Aha<'a> {
         }
     }
 
-    pub fn get_json(&self, url: String, base: String) -> Result<Value, serde_json::Error> {
-        let api_base = format!("{}{}", base, "s");
-        let uri = format!("https://{}.aha.io/api/v1/{}/{}", self.domain, api_base, url);
+    pub fn get(&self, url: Url, base: String) -> Result<Value, serde_json::Error> {
+        let uri = url.to_string();
         if self.opt.verbose {
             println!("{} url: {}", base, uri);
         }
@@ -233,6 +376,41 @@ impl<'a> Aha<'a> {
             ex
         }
     }
+
+    pub fn get_json(&self, end_path: String, base: String) -> Result<Value, serde_json::Error> {
+        let uri = format!("https://{}.aha.io/api/v1/", self.domain);
+        let url = Url::parse(&uri).unwrap();
+
+        let api_url = if !end_path.is_empty() {
+            format!("/{}", end_path)
+        } else {
+            "".to_string()
+        };
+        let url = url.join(&format!("{}{}{}", base, "s", api_url)).unwrap();
+        self.get(url, base)
+    }
+}
+
+// keep
+#[derive(Serialize, Debug, Deserialize)]
+pub struct FeatureCreate {
+    name: String,
+    release_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_fields: Option<CustomNotes>,
+}
+
+// keep
+#[derive(Serialize, Debug, Deserialize)]
+pub struct FeatureUpdateCreate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assigned_to_user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_fields: Option<CustomFieldGithub>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_status: Option<WorkflowStatusUpdate>,
 }
 
 // keep
@@ -248,7 +426,14 @@ pub struct FeatureUpdate {
 //keep
 #[derive(Serialize, Debug, Deserialize)]
 pub struct WorkflowStatusUpdate {
-    name: String,
+    pub name: String,
+}
+
+// kepp
+#[derive(Serialize, Debug, Deserialize)]
+pub struct CustomNotes {
+    #[serde(rename = "release_notes1")]
+    notes: String,
 }
 // kepp
 #[derive(Serialize, Debug, Deserialize)]

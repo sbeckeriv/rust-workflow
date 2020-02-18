@@ -73,7 +73,7 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
         branches.push(pull);
     }
 
-    if !config.silent {
+    if config.verbose {
         table.printstd();
     }
     Ok(branches)
