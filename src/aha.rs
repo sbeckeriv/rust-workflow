@@ -169,14 +169,12 @@ impl<'a> Aha<'a> {
             }
 
             match self.get_json(key.clone(), source.to_string()) {
-                Ok(feature) => self
-                    .update_aha(key, pr, feature, labels, source)
-                    .unwrap(),
+                Ok(feature) => self.update_aha(key, pr, feature, labels, source).unwrap(),
                 Err(error) => println!("Error {}: {}", source, error),
             }
         } else if self.opt.verbose {
-    println!("Did not match {}", pr.name);
-}
+            println!("Did not match {}", pr.name);
+        }
         Ok(())
     }
     pub fn generate_update_function(
@@ -190,7 +188,7 @@ impl<'a> Aha<'a> {
         } else {
             None
         };
-
+        dbg!(&current["custom_fields"]);
         let count = if current["custom_fields"].is_null() {
             0
         } else {
@@ -202,8 +200,8 @@ impl<'a> Aha<'a> {
                 .filter(|cf| cf["name"] == "Pull Request")
                 .count()
         };
-
-        let custom = if count > 0 {
+        // set it if it is not there.
+        let custom = if count == 0 {
             Some(CustomFieldGithub {
                 github_url: pr.url.clone(),
             })
@@ -304,17 +302,21 @@ impl<'a> Aha<'a> {
         labels: Option<HashMap<String, String>>,
         base: String,
     ) -> Result<(), serde_json::Error> {
-        let uri = format!("https://{}.aha.io/api/v1/{}/{}", self.domain, base, key);
+        let uri = format!("https://{}.aha.io/api/v1/{}s/{}", self.domain, base, key);
         let status = self.status_for_labels(pr.labels.clone(), labels);
         let feature = self.generate_update_function(&current, &pr, status);
         let json_string = serde_json::to_string(&feature)?;
         if self.opt.verbose {
-            println!("puting {} json: {}", base, json_string);
+            println!("puting {} json: {} | {}", base, json_string, uri);
         }
         if !self.opt.silent && json_string.len() > 4 && !current["url"].is_null() {
             Notification::new()
                 .summary(&format!("Updating requirement {}", key))
-                .body(&format!("{}\n{}", current["url"], pr.url))
+                .body(&format!(
+                    "{}\n{}",
+                    current["url"].as_str().unwrap(),
+                    pr.number
+                ))
                 .icon("firefox")
                 .timeout(0)
                 .show()
@@ -329,7 +331,10 @@ impl<'a> Aha<'a> {
             }
             let feature: Result<Value, _> = serde_json::from_str(&text);
 
-            if let Ok(_) = feature {
+            if let Ok(f) = feature {
+                if f[base].is_null() {
+                    println!("json failed to parse {:?}", text);
+                }
                 Ok(())
             } else {
                 if self.opt.verbose {
