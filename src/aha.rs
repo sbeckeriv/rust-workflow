@@ -188,7 +188,6 @@ impl<'a> Aha<'a> {
         } else {
             None
         };
-        dbg!(&current["custom_fields"]);
         let count = if current["custom_fields"].is_null() {
             0
         } else {
@@ -255,7 +254,7 @@ impl<'a> Aha<'a> {
             .unwrap()
             .join(&format!("{}/", projects[index]["id"].as_str().unwrap()))
             .unwrap()
-            .join("releases")
+            .join("releases?exclude_shipped=true")
             .unwrap();
         let releases = self.get(releases_url, "releases".to_string()).unwrap();
         let releases = releases.as_array().unwrap();
