@@ -1,3 +1,4 @@
+#[derive(Debug, Clone)]
 pub struct GithubEnv {
     pub github_api_token: String,
     pub workflow_repo: String,
@@ -22,12 +23,53 @@ fn parse_repo_name(repo_name: &str) -> Result<(&str, &str), failure::Error> {
     }
 }
 
-pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
+pub fn pr_table(response_body: &RootInterface) {
+    let mut table = prettytable::Table::new();
+    for issue in response_body.items.iter() {
+        let ref_head = issue.title.clone();
+        let label_names: Vec<String> = issue
+            .labels
+            .iter()
+            .map(|label| label.name.clone())
+            .collect();
+        let mut body = issue.body.clone();
+
+        let checked = body.contains(
+            "- [x] [Correctness](https://big.aha.io/products/ENG/pages/ENG-N-53)
+- [x] [Readability](https://big.aha.io/products/ENG/pages/ENG-N-53)
+- [x] [Security](https://big.aha.io/products/ENG/pages/ENG-N-103)
+- [x] [Testing](https://big.aha.io/products/ENG/pages/ENG-N-53)",
+        );
+
+        body.truncate(20);
+        let requested_reviewers: Vec<String> = issue
+            .requested_reviewers
+            .iter()
+            .map(|user| user.login.clone())
+            .collect();
+
+        table.add_row(row!(
+            issue.title,
+            body,
+            ref_head,
+            label_names.join(","),
+            issue.html_url,
+            checked,
+            issue.mergeable,
+            issue.mergeable_state,
+            requested_reviewers.join(",")
+        ));
+    }
+    table.printstd();
+}
+
+pub fn pr_data(config: &GithubEnv, author: String, open: bool) -> RootInterface {
     let (owner, name) = parse_repo_name(&config.workflow_repo).unwrap();
     let client = reqwest::Client::new();
+    let state = if open { "open" } else { "closed" };
     let url = format!(
-        "https://api.github.com/search/issues?q=is:open+is:pr+repo:{}/{}+author:{}&sort=created",
-        owner, name, config.workflow_login
+        "https://api.github.com/search/issues?q=is:#{}+is:pr+repo:{}/{}+author:{}&sort=created",
+        state, owner, name, author
     );
     if config.verbose {
         println!("github search url: {}", url)
@@ -38,16 +80,19 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
             config.workflow_login.clone(),
             Some(config.github_api_token.clone()),
         )
-        .send()?;
+        .send()
+        .unwrap();
 
-    let response_body: RootInterface = res.json().expect("Could not find repo");
+    res.json().expect("Could not find repo")
+}
+
+pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
+    let response_body = pr_data(&config, config.workflow_login.clone(), true);
     if config.verbose {
-        info!("{:?}", response_body);
+        pr_table(&response_body);
     }
-
     let response_data = response_body.items;
     let mut branches: Vec<PullRequest> = Vec::new();
-    let mut table = prettytable::Table::new();
     for issue in &response_data {
         let ref_head = issue.title.clone();
         let label_names: Vec<String> = issue
@@ -55,15 +100,6 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
             .iter()
             .map(|label| label.name.clone())
             .collect();
-        let mut body = issue.body.clone();
-        body.truncate(20);
-        table.add_row(row!(
-            issue.title,
-            body,
-            ref_head,
-            label_names.join(","),
-            issue.html_url,
-        ));
         let pull = PullRequest {
             number: issue.number,
             url: issue.html_url.clone(),
@@ -73,12 +109,10 @@ pub fn prs(config: GithubEnv) -> Result<Vec<PullRequest>, failure::Error> {
         branches.push(pull);
     }
 
-    if config.verbose {
-        table.printstd();
-    }
     Ok(branches)
 }
-#[derive(Serialize, Debug, Deserialize)]
+
+#[derive(Serialize, Debug, Deserialize, Clone)]
 struct Items {
     url: String,
     html_url: String,
@@ -92,9 +126,12 @@ struct Items {
     updated_at: String,
     closed_at: Option<String>,
     body: String,
+    mergeable: String,
+    mergeable_state: String,
+    requested_reviewers: Vec<User>,
 }
 
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Debug, Deserialize, Clone)]
 struct Labels {
     name: String,
 }
@@ -108,13 +145,13 @@ struct PullRequest1 {
 }
 
 #[derive(Serialize, Debug, Deserialize)]
-struct RootInterface {
+pub struct RootInterface {
     total_count: i64,
     incomplete_results: bool,
     items: Vec<Items>,
 }
 
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Debug, Deserialize, Clone)]
 struct User {
     login: String,
     id: i64,

@@ -4,9 +4,8 @@ extern crate envy;
 extern crate termion;
 #[macro_use]
 extern crate failure;
-#[macro_use]
-extern crate log;
 extern crate env_logger;
+extern crate log;
 extern crate reqwest;
 extern crate serde;
 extern crate serde_json;
@@ -40,6 +39,10 @@ pub struct Opt {
     config_file: Option<String>,
     #[structopt(short = "g", long = "generate")]
     generate: bool,
+    #[structopt(short = "p", long = "prs")]
+    pr_status: bool,
+    #[structopt(long = "closed")]
+    closed: bool,
 }
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -159,7 +162,20 @@ fn main() -> Result<(), failure::Error> {
         config.workflow_email,
         &opt,
     );
-    if opt.generate {
+
+    if opt.pr_status {
+        for repo in repos {
+            let github = github::GithubEnv {
+                github_api_token: config.github_api_token.clone(),
+                workflow_repo: repo.name.clone(),
+                workflow_login: repo.username.clone(),
+                silent,
+                verbose: verbose.clone(),
+            };
+            let response_body = github::pr_data(&github, "".to_string(), !opt.closed);
+            github::pr_table(&response_body);
+        }
+    } else if opt.generate {
         let feature = aha.generate().unwrap()["feature"].take();
         println!(
             "{} {}",
