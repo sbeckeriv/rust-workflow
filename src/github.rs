@@ -42,12 +42,17 @@ pub fn pr_table(response_body: &RootInterface) {
         );
 
         body.truncate(20);
-        let requested_reviewers: Vec<String> = issue
-            .requested_reviewers
-            .iter()
-            .map(|user| user.login.clone())
-            .collect();
+        // let requested_reviewers: Vec<String> = issue .requested_reviewers .iter() .map(|user| user.login.clone()) .collect();
 
+        let mergeable = match &issue.mergeable {
+            Some(mer) => mer.clone(),
+            _ => "".to_string(),
+        };
+
+        let mergeable_state = match &issue.mergeable_state {
+            Some(mer) => mer.clone(),
+            _ => "".to_string(),
+        };
         table.add_row(row!(
             issue.title,
             body,
@@ -55,9 +60,9 @@ pub fn pr_table(response_body: &RootInterface) {
             label_names.join(","),
             issue.html_url,
             checked,
-            issue.mergeable,
-            issue.mergeable_state,
-            requested_reviewers.join(",")
+            mergeable,
+            mergeable_state,
+            //requested_reviewers.join(",")
         ));
     }
     table.printstd();
@@ -67,8 +72,13 @@ pub fn pr_data(config: &GithubEnv, author: String, open: bool) -> RootInterface 
     let (owner, name) = parse_repo_name(&config.workflow_repo).unwrap();
     let client = reqwest::Client::new();
     let state = if open { "open" } else { "closed" };
+    let author = if author.len() > 0 {
+        format!("+author:{}", author)
+    } else {
+        author
+    };
     let url = format!(
-        "https://api.github.com/search/issues?q=is:#{}+is:pr+repo:{}/{}+author:{}&sort=created",
+        "https://api.github.com/search/issues?q=is:{}+is:pr+repo:{}/{}{}&sort=created",
         state, owner, name, author
     );
     if config.verbose {
@@ -126,9 +136,9 @@ struct Items {
     updated_at: String,
     closed_at: Option<String>,
     body: String,
-    mergeable: String,
-    mergeable_state: String,
-    requested_reviewers: Vec<User>,
+    mergeable: Option<String>,
+    mergeable_state: Option<String>,
+    requested_reviewers: Option<Vec<User>>,
 }
 
 #[derive(Serialize, Debug, Deserialize, Clone)]
